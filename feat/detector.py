@@ -266,7 +266,7 @@ class Detector(nn.Module, PyTorchModelHubMixin):
         else:
             self.emotion_detector = None
 
-        # Initialize Identity Detecctor -  facenet
+        # Initialize Identity Detector -  facenet
         self.info["identity_model"] = identity_model
         if identity_model is not None:
             if identity_model == "facenet":

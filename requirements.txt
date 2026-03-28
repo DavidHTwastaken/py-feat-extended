@@ -20,3 +20,4 @@ safetensors
 skops
 onnx2torch
 plotly
+Flask

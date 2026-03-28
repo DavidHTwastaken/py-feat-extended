@@ -1,0 +1,111 @@
+/* General styles */
+body {
+  font-family: Arial, sans-serif;
+  margin: 0;
+  padding: 0;
+  background-color: #f9f9f9;
+  color: #333;
+}
+
+.container {
+  max-width: 800px;
+  margin: 50px auto;
+  padding: 20px;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+h1 {
+  text-align: center;
+  color: #444;
+}
+
+p {
+  text-align: center;
+  color: #666;
+}
+
+/* Form styles */
+form {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+label {
+  font-size: 1rem;
+  color: #555;
+}
+
+input[type="file"] {
+  padding: 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+small {
+  font-size: 0.9rem;
+  color: #888;
+}
+
+button {
+  padding: 10px;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1rem;
+}
+
+button:hover {
+  background-color: #0056b3;
+}
+
+/* File list styles */
+.file-list {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background-color: #f4f4f4;
+}
+
+.file-list p {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #555;
+}
+
+/* Loading and results styles */
+.loading,
+.results {
+  margin-top: 20px;
+  padding: 15px;
+  border-radius: 4px;
+  text-align: center;
+}
+
+.loading {
+  background-color: #fffae6;
+  color: #856404;
+}
+
+.results {
+  background-color: #e6ffed;
+  color: #155724;
+}
+
+.results .error {
+  color: #721c24;
+  background-color: #f8d7da;
+  padding: 10px;
+  border-radius: 4px;
+}

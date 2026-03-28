@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Facial Expression Detection</title>
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='main.css') }}"
+    />
+  </head>
+  <body>
+    <div class="container">
+      <h1>Facial Expression Detection</h1>
+      <p>Upload multiple images for facial expression analysis</p>
+
+      <form id="detectionForm" enctype="multipart/form-data">
+        <div class="form-group">
+          <label for="imageInput">Select Images:</label>
+          <input
+            type="file"
+            id="imageInput"
+            name="images"
+            multiple
+            accept="image/*"
+            required
+          />
+          <small>Supported formats: JPG, PNG, GIF</small>
+        </div>
+
+        <div id="fileList" class="file-list"></div>
+
+        <button type="submit" class="btn-primary">Detect Expressions</button>
+      </form>
+
+      <div id="loading" class="loading hidden">
+        <p>Processing images...</p>
+      </div>
+
+      <div id="results" class="results hidden"></div>
+    </div>
+
+    <script>
+      const form = document.getElementById("detectionForm");
+      const imageInput = document.getElementById("imageInput");
+      const fileList = document.getElementById("fileList");
+      const loadingDiv = document.getElementById("loading");
+      const resultsDiv = document.getElementById("results");
+
+      imageInput.addEventListener("change", (e) => {
+        fileList.innerHTML = "";
+        Array.from(e.target.files).forEach((file) => {
+          const p = document.createElement("p");
+          p.textContent = file.name;
+          fileList.appendChild(p);
+        });
+      });
+
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+
+        const formData = new FormData(form);
+        loadingDiv.classList.remove("hidden");
+        resultsDiv.classList.add("hidden");
+
+        try {
+          const response = await fetch("/detect", {
+            method: "POST",
+            body: formData,
+          });
+
+          const data = await response.json();
+          loadingDiv.classList.add("hidden");
+          displayResults(data);
+        } catch (error) {
+          loadingDiv.classList.add("hidden");
+          resultsDiv.classList.remove("hidden");
+          resultsDiv.innerHTML = `<p class="error">Error: ${error.message}</p>`;
+        }
+      });
+
+      function displayResults(data) {
+        resultsDiv.classList.remove("hidden");
+        resultsDiv.innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+      }
+    </script>
+  </body>
+</html>

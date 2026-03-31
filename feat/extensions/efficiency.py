@@ -11,7 +11,7 @@ Provides an OptimizedDetector wrapper that adds:
 import time
 import torch
 import psutil
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext as _nullcontext
 from typing import Optional, List, Union
 from pathlib import Path
 
@@ -43,8 +43,17 @@ class OptimizedDetector:
             self._convert_to_half()
 
     def _convert_to_half(self):
-        """Convert detector models to FP16 for faster GPU inference."""
-        self.detector.half()
+        """Enable FP16 via autocast for faster GPU inference.
+
+        Rather than converting model weights directly (which causes dtype
+        mismatches in ops like torchvision::nms that expect input and weight
+        types to match), we set a flag and apply torch.autocast during
+        detection. This lets CUDA kernels choose FP16 where safe while
+        keeping ops like NMS in FP32 automatically.
+        """
+        # We no longer call self.detector.half() because it causes
+        # dtype mismatches. Instead, autocast is applied in detect().
+        pass
 
     def _estimate_batch_size(self, sample_size: tuple = (3, 512, 512)) -> int:
         """Estimate optimal batch size based on available memory."""
@@ -99,18 +108,20 @@ class OptimizedDetector:
         elif batch_size is None:
             batch_size = 1
 
-        # Run detection under inference mode
+        # Run detection under inference mode (with autocast for half precision)
         with self._timed("detection"):
             with torch.inference_mode():
-                results = self.detector.detect(
-                    inputs,
-                    data_type=data_type,
-                    batch_size=batch_size,
-                    face_detection_threshold=face_detection_threshold,
-                    skip_frames=skip_frames,
-                    progress_bar=progress_bar,
-                    **kwargs,
-                )
+                ctx = torch.autocast("cuda") if self.use_half_precision and str(self.detector.device) != "cpu" else _nullcontext()
+                with ctx:
+                    results = self.detector.detect(
+                        inputs,
+                        data_type=data_type,
+                        batch_size=batch_size,
+                        face_detection_threshold=face_detection_threshold,
+                        skip_frames=skip_frames,
+                        progress_bar=progress_bar,
+                        **kwargs,
+                    )
 
         timing = self.get_timing_summary()
         return results, timing
@@ -137,10 +148,12 @@ class OptimizedDetector:
         times = []
         for _ in range(n_runs):
             with torch.inference_mode():
-                start = time.perf_counter()
-                self.detector.detect([image_path], data_type="image", progress_bar=False)
-                elapsed = time.perf_counter() - start
-                times.append(elapsed)
+                ctx = torch.autocast("cuda") if self.use_half_precision and str(self.detector.device) != "cpu" else _nullcontext()
+                with ctx:
+                    start = time.perf_counter()
+                    self.detector.detect([image_path], data_type="image", progress_bar=False)
+                    elapsed = time.perf_counter() - start
+                    times.append(elapsed)
 
         return {
             "mean_seconds": sum(times) / len(times),

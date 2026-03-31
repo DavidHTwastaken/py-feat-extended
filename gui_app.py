@@ -72,6 +72,18 @@ EMOTION_DESCRIPTIONS = {
 # ---------------------------------------------------------------------------
 @st.cache_resource(show_spinner="Loading Py-Feat models (first time may take a minute)...")
 def load_detector(landmark_model, au_model, emotion_model, identity_model, device):
+    # Ensure classifiers are in __main__ for skops deserialization under Streamlit.
+    # The .skops model files reference these classes as '__main__.XGBClassifier' etc.
+    # because they were serialized from a script where these classes were in __main__.
+    # Under Streamlit, __main__ is Streamlit's bootstrapper, not our script, so the
+    # patching in detector.py (line 51-53) targets the wrong module. We fix it here.
+    import sys
+    from feat.au_detectors.StatLearning.SL_test import XGBClassifier, SVMClassifier
+    from feat.emo_detectors.StatLearning.EmoSL_test import EmoSVMClassifier
+    sys.modules["__main__"].__dict__["XGBClassifier"] = XGBClassifier
+    sys.modules["__main__"].__dict__["SVMClassifier"] = SVMClassifier
+    sys.modules["__main__"].__dict__["EmoSVMClassifier"] = EmoSVMClassifier
+
     from feat.detector import Detector
     det = Detector(
         landmark_model=landmark_model if landmark_model != "None" else None,
@@ -81,6 +93,7 @@ def load_detector(landmark_model, au_model, emotion_model, identity_model, devic
         device=device,
     )
     return det
+
 
 
 def get_optimized_detector(detector, use_half, auto_batch):

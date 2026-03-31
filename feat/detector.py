@@ -394,7 +394,7 @@ class Detector(nn.Module, PyTorchModelHubMixin):
                 landmarks = self.landmark_detector.forward(
                     extracted_faces.to(self.device)
                 )
-            if self.info["landmark_model"].lower() == "mobilefacenet":
+            elif self.info["landmark_model"].lower() == "mobilefacenet":
                 landmarks = self.landmark_detector.forward(
                     extracted_faces.to(self.device)
                 )[0]

@@ -2575,6 +2575,12 @@ class VideoDataset(Dataset):
         self.video_frames = np.arange(
             0, self.metadata["num_frames"], 1 if skip_frames is None else skip_frames
         )
+        # Open video container once for efficient sequential access
+        self._container = av.open(video_file)
+        self._stream = self._container.streams.video[0]
+        self._stream.thread_type = "AUTO"
+        self._frame_gen = None
+        self._gen_position = -1  # Track current generator position
 
     def __len__(self):
         # Number of frames respective skip_frames
@@ -2632,19 +2638,54 @@ class VideoDataset(Dataset):
         }
 
     def load_frame(self, idx):
-        """Load in a single frame from the video using a lazy generator"""
+        """Load a single frame from the video efficiently.
+
+        Uses a persistent container and sequential generator for O(1) access
+        when frames are requested in order. Falls back to seeking for random access.
+        """
 
         # Get frame number respecting skip_frames
         frame_idx = int(self.video_frames[idx])
 
-        # Use a py-av generator to load in just this frame
-        container = av.open(self.file_name)
-        stream = container.streams.video[0]
-        frame = next(islice(container.decode(stream), frame_idx, None))
-        frame_data = torch.from_numpy(frame.to_ndarray(format="rgb24"))
-        container.close()
+        # If requesting a frame behind current position, reset generator
+        if self._frame_gen is None or frame_idx <= self._gen_position:
+            # Seek to nearest keyframe before target
+            if frame_idx > 0:
+                # Seek by timestamp
+                time_base = self._stream.time_base
+                fps = self.metadata["fps"] or 30.0
+                target_pts = int(frame_idx / fps / time_base)
+                self._container.seek(target_pts, stream=self._stream)
+            else:
+                self._container.seek(0)
+            self._frame_gen = self._container.decode(self._stream)
+            self._gen_position = -1
 
+        # Decode forward to the target frame
+        frame = None
+        for av_frame in self._frame_gen:
+            self._gen_position += 1
+            if self._gen_position >= frame_idx:
+                frame = av_frame
+                break
+
+        if frame is None:
+            # Fallback: reopen and decode sequentially (shouldn't normally happen)
+            container = av.open(self.file_name)
+            stream = container.streams.video[0]
+            frame = next(islice(container.decode(stream), frame_idx, None))
+            container.close()
+
+        frame_data = torch.from_numpy(frame.to_ndarray(format="rgb24"))
         return frame_data, frame_idx
+
+    def __del__(self):
+        """Close the video container on cleanup."""
+        if hasattr(self, "_container") and self._container is not None:
+            try:
+                self._container.close()
+            except Exception:
+                pass
 
     def calc_approx_frame_time(self, idx):
         """Calculate the approximate time of a frame in a video

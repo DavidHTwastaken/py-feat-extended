@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install:*)",
+      "Bash(pip --version)",
+      "Bash(python -m pip install --upgrade pip)",
+      "Bash(py:*)",
+      "Bash(.venv/Scripts/python.exe -m pip install --upgrade pip)",
+      "Bash(.venv/Scripts/pip.exe install:*)",
+      "Bash(.venv/Scripts/python test_webcam.py)",
+      "Bash(.venv/Scripts/pip install:*)",
+      "Bash(.venv/Scripts/python profile_pipeline.py)"
+    ]
+  }
+}

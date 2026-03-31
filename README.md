@@ -56,4 +56,105 @@ As of version 0.7.0, all model weights are hosted on the [Py-feat HuggingFace Hu
 For prior versions, model weights are stored on Github static assets in release tagged `v0.1`. They will automatically download as needed.
 
 ## Licenses
-Py-FEAT is provided under the MIT license. You also need to respect the licenses of each model you are using. Please see the LICENSE file for links to each model's license information. 
+Py-FEAT is provided under the MIT license. You also need to respect the licenses of each model you are using. Please see the LICENSE file for links to each model's license information.
+
+---
+
+# Py-Feat Extended — GUI & Enhancements
+
+## Quick Start
+
+### 1. Create conda environment
+
+**arm64 Mac (M1/M2/M3):**
+```bash
+CONDA_SUBDIR=osx-arm64 conda create -n pyfeat python=3.11 -y
+conda activate pyfeat
+```
+
+**Intel Mac / Linux:**
+```bash
+conda create -n pyfeat python=3.11 -y
+conda activate pyfeat
+```
+
+### 2. Install dependencies
+
+```bash
+pip install -r requirements.txt
+pip install -r requirements-gui.txt
+```
+
+### 3. Launch the GUI
+
+```bash
+streamlit run gui_app.py
+```
+
+Opens at **http://localhost:8501**. First run downloads models from HuggingFace (~500MB, one time only).
+
+Custom port:
+```bash
+streamlit run gui_app.py --server.port 8080
+# or
+./run_gui.sh --port 8080
+```
+
+## What's New
+
+| Enhancement | Description |
+|-------------|-------------|
+| **Web GUI** | Upload images/videos, configure models, visualize results — no code required |
+| **Computational Efficiency** | FP16 inference, auto batch sizing, performance benchmarking |
+| **Batch Processing** | Process entire folders with progress tracking, resume support, error recovery |
+| **Interpretable Reports** | Plain-language summaries, AU/emotion explanations, comparative analysis, HTML export |
+
+## GUI Tabs
+
+| Tab | What it does |
+|-----|-------------|
+| **Image Analysis** | Upload images, detect faces/emotions/AUs/landmarks, view interpretable summaries |
+| **Video Analysis** | Upload video, see emotion and AU timelines across frames |
+| **Batch Processing** | Point to a local folder, process all files with progress and error handling |
+| **Report Generator** | Dataset summaries, group comparisons, downloadable HTML reports |
+| **Saved Results** | Load and explore previously exported CSV results |
+
+## Sidebar Options
+
+- **Models** — Landmark (mobilefacenet / mobilenet / pfld), AU (xgb / svm), Emotion (resmasknet / svm), Identity (facenet)
+- **Detection Settings** — Face detection threshold, batch size
+- **Efficiency** — Half precision (FP16) for GPU, auto batch sizing
+- **Benchmark** — Test detection speed on a sample image
+
+## Python API (extensions)
+
+```python
+from feat.detector import Detector
+from feat.extensions import OptimizedDetector, BatchProcessor, ReportGenerator
+
+detector = Detector(device="cpu")
+
+# Optimized detection with timing
+opt = OptimizedDetector(detector, use_half_precision=True, auto_batch_size=True)
+results, timing = opt.detect(["photo.jpg"])
+
+# Batch process a folder
+bp = BatchProcessor(detector, chunk_size=20, batch_size=4)
+result = bp.process_folder("/path/to/images", "/path/to/output.csv")
+print(result.summary())
+
+# Generate interpretable reports
+rg = ReportGenerator(results)
+print(rg.summarize_dataset())
+print(rg.summarize_face(0))
+rg.export_html("report.html")
+```
+
+## Troubleshooting
+
+| Problem | Fix |
+|---------|-----|
+| xgboost libomp error on Mac | `brew install libomp` |
+| Models not downloading | Check internet; models cache in `~/.cache/huggingface/` |
+| Slow first detection | Normal — models load on first use. Subsequent runs are faster |
+| CUDA not detected | `pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121` |

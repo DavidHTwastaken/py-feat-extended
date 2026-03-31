@@ -315,7 +315,7 @@ class Detector(nn.Module, PyTorchModelHubMixin):
 
         # img2pose
         frames = convert_image_to_tensor(images, img_type="float32") / 255.0
-        frames.to(self.device)
+        frames = frames.to(self.device)
 
         img2pose_outputs: List[Dict[str, torch.Tensor]] = self.facepose_detector(frames)
         # Extract bounding boxes, poses, and scores for the entire batch
@@ -408,7 +408,7 @@ class Detector(nn.Module, PyTorchModelHubMixin):
             Fex: Prediction results dataframe
         """
 
-        extracted_faces = torch.cat([face["faces"] for face in faces_data], dim=0)
+        extracted_faces = torch.cat([face["faces"] for face in faces_data], dim=0).to(self.device)
         new_bboxes = torch.cat([face["new_boxes"] for face in faces_data], dim=0)
         n_faces = extracted_faces.shape[0]
 
@@ -420,14 +420,12 @@ class Detector(nn.Module, PyTorchModelHubMixin):
                 landmarks = self.landmark_detector.forward(
                     extracted_faces.to(self.device)
                 )
-            if self.info["landmark_model"].lower() == "mobilefacenet":
+            elif self.info["landmark_model"].lower() == "mobilefacenet":
                 landmarks = self.landmark_detector.forward(
                     extracted_faces.to(self.device)
                 )[0]
             else:
-                landmarks = self.landmark_detector.forward(
-                    extracted_faces.to(self.device)
-                )
+                landmarks = self.landmark_detector.forward(extracted_faces)
             new_landmarks = inverse_transform_landmarks_torch(landmarks, new_bboxes)
         else:
             new_landmarks = torch.full((n_faces, 136), float("nan"))
@@ -436,12 +434,12 @@ class Detector(nn.Module, PyTorchModelHubMixin):
             if self.info["emotion_model"] == "resmasknet":
                 resmasknet_faces = torch.cat(
                     [face["resmasknet_faces"] for face in faces_data], dim=0
-                )
-                emotions = self.emotion_detector.forward(resmasknet_faces.to(self.device))
+                ).to(self.device)
+                emotions = self.emotion_detector.forward(resmasknet_faces)
                 emotions = torch.softmax(emotions, 1)
             elif self.info["emotion_model"] == "svm":
                 hog_features, emo_new_landmarks = extract_hog_features(
-                    extracted_faces, landmarks
+                    extracted_faces.cpu(), landmarks.cpu()
                 )
                 emotions = self.emotion_detector.detect_emo(
                     frame=hog_features, landmarks=[emo_new_landmarks]
@@ -451,15 +449,13 @@ class Detector(nn.Module, PyTorchModelHubMixin):
             emotions = torch.full((n_faces, 7), float("nan"))
 
         if self.identity_detector is not None:
-            identity_embeddings = self.identity_detector.forward(
-                extracted_faces.to(self.device)
-            )
+            identity_embeddings = self.identity_detector.forward(extracted_faces)
         else:
             identity_embeddings = torch.full((n_faces, 512), float("nan"))
 
         if self.au_detector is not None:
             hog_features, au_new_landmarks = extract_hog_features(
-                extracted_faces, landmarks
+                extracted_faces.cpu(), landmarks.cpu()
             )
             aus = self.au_detector.detect_au(
                 frame=hog_features, landmarks=[au_new_landmarks]
@@ -471,8 +467,8 @@ class Detector(nn.Module, PyTorchModelHubMixin):
         bboxes = torch.cat(
             [
                 convert_bbox_output(
-                    face_output["new_boxes"].to(self.device),
-                    face_output["scores"].to(self.device),
+                    face_output["new_boxes"],
+                    face_output["scores"],
                 )
                 for face_output in faces_data
             ],
@@ -484,7 +480,7 @@ class Detector(nn.Module, PyTorchModelHubMixin):
         )
 
         poses = torch.cat(
-            [face_output["poses"].to(self.device) for face_output in faces_data], dim=0
+            [face_output["poses"] for face_output in faces_data], dim=0
         )
         feat_poses = pd.DataFrame(
             poses.cpu().detach().numpy(), columns=FEAT_FACEPOSE_COLUMNS_6D
@@ -542,8 +538,8 @@ class Detector(nn.Module, PyTorchModelHubMixin):
         data_type="image",
         output_size=None,
         batch_size=1,
-        num_workers=0,
-        pin_memory=False,
+        num_workers=None,
+        pin_memory=None,
         face_identity_threshold=0.8,
         face_detection_threshold=0.5,
         skip_frames=None,
@@ -559,8 +555,8 @@ class Detector(nn.Module, PyTorchModelHubMixin):
             data_type (str): type of data to be processed; Default 'image' ['image', 'tensor', 'video']
             output_size (int): image size to rescale all image preserving aspect ratio.
             batch_size (int): how many batches of images you want to run at one shot.
-            num_workers (int): how many subprocesses to use for data loading.
-            pin_memory (bool): If ``True``, the data loader will copy Tensors into CUDA pinned memory before returning them.
+            num_workers (int or None): how many subprocesses to use for data loading. None = auto (0 on CPU, min(batch_size, 4) on GPU).
+            pin_memory (bool or None): If ``True``, the data loader will copy Tensors into CUDA pinned memory before returning them. None = auto (True on CUDA, False otherwise).
             face_identity_threshold (float): value between 0-1 to determine similarity of person using face identity embeddings; Default >= 0.8
             face_detection_threshold (float): value between 0-1 to determine if a face was detected; Default >= 0.5
             skip_frames (int or None): number of frames to skip to speed up inference (video only); Default None
@@ -573,6 +569,16 @@ class Detector(nn.Module, PyTorchModelHubMixin):
         """
 
         save = Path(save) if save else None
+
+        # Smart defaults for data loading on GPU
+        is_cuda = str(self.device).startswith("cuda")
+        if num_workers is None:
+            # On Windows, num_workers > 0 requires a __main__ guard and uses
+            # spawn which can be fragile, so default to 0 there.
+            import sys
+            num_workers = 0 if sys.platform == "win32" else (min(batch_size, 4) if is_cuda else 0)
+        if pin_memory is None:
+            pin_memory = is_cuda
 
         if data_type.lower() == "image":
             data_loader = DataLoader(

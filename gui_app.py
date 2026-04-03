@@ -23,6 +23,8 @@ from PIL import Image
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from feat.detector import Detector
+
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -84,7 +86,6 @@ def load_detector(landmark_model, au_model, emotion_model, identity_model, devic
     sys.modules["__main__"].__dict__["SVMClassifier"] = SVMClassifier
     sys.modules["__main__"].__dict__["EmoSVMClassifier"] = EmoSVMClassifier
 
-    from feat.detector import Detector
     det = Detector(
         landmark_model=landmark_model if landmark_model != "None" else None,
         au_model=au_model if au_model != "None" else None,
@@ -398,9 +399,9 @@ with tab_video:
 
     col_v1, col_v2 = st.columns(2)
     with col_v1:
-        skip_frames = st.number_input("Skip frames (0 = process all)", min_value=0, max_value=100, value=0, key="skip_frames")
+        skip_frames = st.number_input("Skip frames (0 = process all)", min_value=0, max_value=100, value=24, key="skip_frames")
     with col_v2:
-        vid_batch = st.number_input("Batch size (video)", min_value=1, max_value=64, value=4, key="vid_batch")
+        vid_batch = st.number_input("Batch size (# of frames)", min_value=1, max_value=64, value=4, key="vid_batch")
 
     if uploaded_video:
         st.video(uploaded_video)

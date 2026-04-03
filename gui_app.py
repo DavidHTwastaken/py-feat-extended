@@ -526,6 +526,11 @@ with tab_batch:
         elif not output_csv:
             st.error("Please provide an output CSV path.")
         else:
+            # If user provided a directory, append a default filename
+            if os.path.isdir(output_csv) or (not output_csv.endswith(".csv") and not os.path.splitext(output_csv)[1]):
+                output_csv = os.path.join(output_csv, "pyfeat_results.csv")
+            # Ensure parent directory exists
+            os.makedirs(os.path.dirname(output_csv) or ".", exist_ok=True)
             with st.spinner("Loading detector..."):
                 detector = load_detector(
                     landmark_option, au_option, emotion_option, identity_option, device_option
@@ -552,7 +557,7 @@ with tab_batch:
                 status_text = st.empty()
 
                 def progress_callback(done, total, current_file):
-                    pct = done / max(total, 1)
+                    pct = min(done / max(total, 1), 1.0)
                     fname = Path(current_file).name if current_file else ""
                     progress.progress(pct, text=f"Processed {done}/{total}")
                     status_text.text(f"Last processed: {fname}")

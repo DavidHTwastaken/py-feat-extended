@@ -1,4 +1,5 @@
 import json
+from typing import List, Dict
 from tqdm import tqdm
 import numpy as np
 import pandas as pd
@@ -316,16 +317,41 @@ class Detector(nn.Module, PyTorchModelHubMixin):
         frames = convert_image_to_tensor(images, img_type="float32") / 255.0
         frames = frames.to(self.device)
 
+        img2pose_outputs: List[Dict[str, torch.Tensor]] = self.facepose_detector(frames)
+        # Extract bounding boxes, poses, and scores for the entire batch
+        bboxes: List[torch.Tensor] = []
+        dofs: List[torch.Tensor] = []
+        scores: List[torch.Tensor] = []
+
+        for output in img2pose_outputs:
+            output =  postprocess_img2pose(
+                output, detection_threshold=face_detection_threshold
+            )
+            bbox = output["boxes"]
+            pose = output["dofs"]
+            score = output["scores"]
+            bboxes.append(bbox)
+            dofs.append(pose)
+            scores.append(score)
+        # Convert lists to tensors
+        # bboxes = torch.cat(bboxes, dim=0)
+        # poses = torch.cat(poses, dim=0)
+        # scores = torch.cat(scores, dim=0)
+        
         batch_results = []
         for i in range(frames.size(0)):
             single_frame = frames[i, ...].unsqueeze(0)  # Extract single image from batch
-            img2pose_output = self.facepose_detector(single_frame)
-            img2pose_output = postprocess_img2pose(
-                img2pose_output[0], detection_threshold=face_detection_threshold
-            )
-            bbox = img2pose_output["boxes"]
-            poses = img2pose_output["dofs"]
-            facescores = img2pose_output["scores"]
+            # img2pose_output = self.facepose_detector(single_frame.to(self.device))
+            # img2pose_output = postprocess_img2pose(
+            #     img2pose_output[0], detection_threshold=face_detection_threshold
+            # )
+            # bbox = img2pose_output["boxes"]
+            # poses = img2pose_output["dofs"]
+            # facescores = img2pose_output["scores"]
+
+            bbox = bboxes[i]
+            pose = dofs[i]
+            facescores = scores[i]
 
             # Extract faces from bbox
             if bbox.numel() != 0:
@@ -342,14 +368,14 @@ class Detector(nn.Module, PyTorchModelHubMixin):
                 bbox = torch.full((1, 4), float("nan"))
                 new_bbox = torch.full((1, 4), float("nan"))
                 facescores = torch.zeros((1))
-                poses = torch.full((1, 6), float("nan"))
+                pose = torch.full((1, 6), float("nan"))
 
             frame_results = {
                 "face_id": i,
                 "faces": extracted_faces,
                 "boxes": bbox,
                 "new_boxes": new_bbox,
-                "poses": poses,
+                "poses": pose,
                 "scores": facescores,
             }
 

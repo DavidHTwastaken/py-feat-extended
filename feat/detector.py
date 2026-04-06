@@ -49,6 +49,13 @@ import sys
 import warnings
 from pathlib import Path
 
+# Check if torch.compile is usable (requires PyTorch 2.0+ and a working compiler backend)
+_USE_TORCH_COMPILE = False
+if hasattr(torch, "compile") and sys.platform != "win32":
+    import shutil
+    if shutil.which("gcc") or shutil.which("clang") or shutil.which("cl"):
+        _USE_TORCH_COMPILE = True
+
 sys.modules["__main__"].__dict__["XGBClassifier"] = XGBClassifier
 sys.modules["__main__"].__dict__["SVMClassifier"] = SVMClassifier
 sys.modules["__main__"].__dict__["EmoSVMClassifier"] = EmoSVMClassifier
@@ -116,11 +123,8 @@ class Detector(nn.Module, PyTorchModelHubMixin):
         self.facepose_detector.load_state_dict(facepose_checkpoint, load_model_weights)
         self.facepose_detector.eval()
         self.facepose_detector.to(self.device)
-        if hasattr(torch, "compile") and str(self.device) != "mps":
-            try:
-                self.facepose_detector = torch.compile(self.facepose_detector)
-            except Exception:
-                pass
+        if _USE_TORCH_COMPILE and str(self.device) != "mps":
+            self.facepose_detector = torch.compile(self.facepose_detector)
 
         # Initialize Landmark Detector
         self.info["landmark_model"] = landmark_model
@@ -170,11 +174,8 @@ class Detector(nn.Module, PyTorchModelHubMixin):
             self.landmark_detector.load_state_dict(landmark_state_dict)
             self.landmark_detector.eval()
             self.landmark_detector.to(self.device)
-            if hasattr(torch, "compile") and str(self.device) != "mps":
-                try:
-                    self.landmark_detector = torch.compile(self.landmark_detector)
-                except Exception:
-                    pass
+            if _USE_TORCH_COMPILE and str(self.device) != "mps":
+                self.landmark_detector = torch.compile(self.landmark_detector)
         else:
             self.landmark_detector = None
 
@@ -247,11 +248,8 @@ class Detector(nn.Module, PyTorchModelHubMixin):
                 self.emotion_detector.load_state_dict(emotion_checkpoint)
                 self.emotion_detector.eval()
                 self.emotion_detector.to(self.device)
-                if hasattr(torch, "compile") and str(self.device) != "mps":
-                    try:
-                        self.emotion_detector = torch.compile(self.emotion_detector)
-                    except Exception:
-                        pass
+                if _USE_TORCH_COMPILE and str(self.device) != "mps":
+                    self.emotion_detector = torch.compile(self.emotion_detector)
             elif emotion_model == "svm":
                 if self.landmark_detector is not None:
                     self.emotion_detector = EmoSVMClassifier()
@@ -303,11 +301,8 @@ class Detector(nn.Module, PyTorchModelHubMixin):
                 )
                 self.identity_detector.eval()
                 self.identity_detector.to(self.device)
-                if hasattr(torch, "compile") and str(self.device) != "mps":
-                    try:
-                        self.identity_detector = torch.compile(self.identity_detector)
-                    except Exception:
-                        pass
+                if _USE_TORCH_COMPILE and str(self.device) != "mps":
+                    self.identity_detector = torch.compile(self.identity_detector)
             else:
                 raise ValueError("{identity_model} is not currently supported.")
         else:

@@ -2287,6 +2287,19 @@ class ImageDataset(Dataset):
         self.output_size = output_size
         self.preserve_aspect_ratio = preserve_aspect_ratio
         self.padding = padding
+        # Cache the transform so we don't recreate it every __getitem__ call
+        if output_size is not None:
+            self._transform = Compose(
+                [
+                    Rescale(
+                        output_size,
+                        preserve_aspect_ratio=preserve_aspect_ratio,
+                        padding=padding,
+                    )
+                ]
+            )
+        else:
+            self._transform = None
 
     def __len__(self):
         return len(self.images)
@@ -2306,20 +2319,8 @@ class ImageDataset(Dataset):
         if img.shape[0] == 1:
             img = torch.cat([img, img, img], dim=0)
 
-        if self.output_size is not None:
-            logging.info(
-                f"ImageDataSet: RESCALING WARNING: from {img.shape} to output_size={self.output_size}"
-            )
-            transform = Compose(
-                [
-                    Rescale(
-                        self.output_size,
-                        preserve_aspect_ratio=self.preserve_aspect_ratio,
-                        padding=self.padding,
-                    )
-                ]
-            )
-            transformed_img = transform(img)
+        if self._transform is not None:
+            transformed_img = self._transform(img)
             return {
                 "Image": transformed_img["Image"],
                 "Scale": transformed_img["Scale"],

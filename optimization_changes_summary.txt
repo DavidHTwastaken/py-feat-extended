@@ -1,0 +1,212 @@
+================================================================================
+       py-feat-extended: Optimization & Efficiency Changes Summary
+================================================================================
+
+This document summarizes all optimization and efficiency improvements made
+to the py-feat-extended fork compared to the original py-feat (cosanlab/py-feat).
+
+Fork point: commit c4f6364 (Merge pull request #228 from cosanlab/huggingface)
+
+================================================================================
+1. BATCHED FACE DETECTION (HIGH IMPACT)
+================================================================================
+
+File:    feat/detector.py, forward_face_detect(), lines ~320-340
+
+Change:  The original code ran img2pose face detection ONE FRAME AT A TIME
+         inside a for-loop, extracting each frame with unsqueeze(0). The new
+         code passes the ENTIRE BATCH of frames to self.facepose_detector(frames)
+         in a single forward call, then post-processes each output individually.
+
+Impact:  This is the single largest performance optimization. Batched GPU
+         inference is dramatically faster than sequential single-image inference
+         due to GPU parallelism and reduced kernel launch overhead. For a batch
+         of N images, this eliminates N-1 redundant model forward passes.
+
+================================================================================
+2. GPU/CUDA DEVICE TRANSFER FIX (HIGH IMPACT)
+================================================================================
+
+File:    feat/detector.py, forward_face_detect(), line ~318
+
+Change:  frames.to(self.device) changed to frames = frames.to(self.device)
+
+Impact:  The original code called .to(device) but DISCARDED the return value.
+         The tensor was never actually moved to GPU. This is both a correctness
+         bug and a performance fix -- without it, all subsequent operations ran
+         on CPU even when a GPU was available.
+
+================================================================================
+3. ELIMINATION OF REDUNDANT .to(device) CALLS (LOW-MEDIUM IMPACT)
+================================================================================
+
+File:    feat/detector.py, forward_pass(), lines ~394-466
+
+Changes:
+  - extracted_faces is moved to self.device ONCE at concatenation time
+    (added .to(self.device) to the torch.cat call), then all downstream
+    redundant .to(self.device) calls are removed from the landmark detection,
+    identity detection, and emotion detection branches.
+  - resmasknet_faces similarly gets .to(self.device) at torch.cat time instead
+    of at forward() time.
+  - Removed .to(self.device) on new_boxes and scores in convert_bbox_output
+    calls (data already on the correct device).
+  - Removed .to(self.device) on poses concatenation (already on device).
+
+Impact:  Avoids repeated no-op device transfers and the overhead of checking/
+         moving tensors that are already on the target device. Cleaner data
+         flow -- tensors are placed on device once at the aggregation boundary.
+
+================================================================================
+4. EXPLICIT .cpu() CALLS FOR CPU-ONLY OPERATIONS (CORRECTNESS + PERF)
+================================================================================
+
+File:    feat/detector.py, forward_pass(), lines ~425, ~438
+
+Change:  extract_hog_features(extracted_faces, landmarks) changed to
+         extract_hog_features(extracted_faces.cpu(), landmarks.cpu()) in both
+         the SVM emotion detector path and the AU detector path.
+
+Impact:  HOG feature extraction uses scikit-image (CPU-only). Explicitly
+         calling .cpu() makes the data flow correct and avoids implicit device
+         mismatch errors when GPU tensors are passed to numpy-based code.
+
+================================================================================
+5. SMART DATALOADER DEFAULTS (MEDIUM IMPACT)
+================================================================================
+
+File:    feat/detector.py, detect_image() / detect_video(), lines ~519-560
+
+Changes:
+  - num_workers default changed from 0 to auto-detect:
+      On CUDA + non-Windows: min(batch_size, 4)
+      On CPU or Windows: 0
+  - pin_memory default changed from False to auto-detect:
+      Automatically set to True when using CUDA.
+
+Impact:  pin_memory=True enables page-locked host memory, speeding up
+         host-to-GPU data transfers. num_workers > 0 enables parallel data
+         loading so the CPU can prepare the next batch while the GPU processes
+         the current one. The Windows guard avoids known issues with
+         spawn-based multiprocessing on Windows.
+
+================================================================================
+6. CONDITIONAL BRANCH FIX (NEGLIGIBLE IMPACT)
+================================================================================
+
+File:    feat/detector.py, forward_pass(), line ~409
+
+Change:  Second "if" for landmark model dispatch changed to "elif".
+
+Impact:  Avoids evaluating a redundant string comparison condition when the
+         first branch already matched. Minor correctness/clarity improvement.
+
+================================================================================
+7. OPTIMIZED DETECTOR WRAPPER (feat/extensions/efficiency.py)
+================================================================================
+
+A new module providing an OptimizedDetector wrapper class with four
+optimization capabilities:
+
+7a. Automatic torch.inference_mode() context
+    File: efficiency.py, detect(), line 113
+    Impact: Disables autograd tracking and version counting, reducing memory
+    usage and speeding up forward passes. More efficient than torch.no_grad().
+
+7b. Half-precision (FP16) via torch.autocast("cuda")
+    File: efficiency.py, detect(), line 114; _convert_to_half(), lines 45-56
+    Design: Rather than calling model.half() (which causes dtype mismatches
+    in ops like torchvision::nms), uses torch.autocast("cuda") which lets
+    CUDA kernels choose FP16 where numerically safe and keeps sensitive ops
+    like NMS in FP32 automatically.
+    Impact: FP16 roughly halves GPU memory usage for activations and can
+    provide ~2x throughput on Tensor Core hardware (Volta, Turing, Ampere,
+    Hopper GPUs).
+
+7c. Automatic batch size estimation
+    File: efficiency.py, _estimate_batch_size(), lines 58-77
+    Logic: On GPU: queries torch.cuda.get_device_properties().total_memory
+    and torch.cuda.memory_allocated(), estimates ~100MB per image, caps at 32.
+    On CPU: uses psutil.virtual_memory().available with ~50MB per image.
+    Respects a configurable max_memory_usage fraction (default 0.8).
+    Impact: Prevents OOM crashes on large datasets while maximizing throughput
+    by using as much memory as safely available.
+
+7d. Performance timing instrumentation
+    File: efficiency.py, _timed() context manager (line 79),
+          get_timing_summary() (line 129)
+    Impact: Built-in profiling support. Every detect() call records timing,
+    enabling easy identification of bottlenecks.
+
+================================================================================
+8. BATCH PROCESSOR FOR LARGE-SCALE PROCESSING
+   (feat/extensions/batch_processor.py)
+================================================================================
+
+8a. Chunk-based streaming to disk
+    File: batch_processor.py, process_folder(), lines 164-215
+    Design: Processes files in configurable chunk_size (default 20) groups,
+    appending results to CSV after each chunk.
+    Impact: Prevents OOM on large datasets (thousands of images) by not
+    accumulating all results in memory. Memory usage is O(chunk_size) rather
+    than O(total_files).
+
+8b. Resume capability
+    File: batch_processor.py, _load_processed_files() (line 107),
+          process_folder() (lines 152-156)
+    Design: Reads the "input" column from an existing output CSV to build a
+    set of already-processed files. Skips those on subsequent runs.
+    Impact: Avoids redundant recomputation when processing is interrupted or
+    when new files are added to a folder.
+
+8c. torch.inference_mode() wrapping
+    File: batch_processor.py, lines 168, 255
+    Impact: All detection calls wrapped in inference_mode() for reduced
+    memory usage and faster forward passes.
+
+8d. Per-file error isolation
+    File: batch_processor.py, lines 193-196, 217-221
+    Impact: A single corrupt file does not crash the entire batch. Errors
+    are logged and processing continues, avoiding wasted computation.
+
+================================================================================
+9. BENCHMARKING TOOL (benchmark_run.py)
+================================================================================
+
+File:    benchmark_run.py
+
+Purpose: Systematic benchmarking across configurations:
+         - CPU baseline
+         - CUDA baseline
+         - CUDA + FP16
+         - CUDA + auto-batch
+         - CUDA + FP16 + auto-batch
+         For both image and video inputs.
+
+Design:  Includes warmup runs, N_RUNS=3 timed iterations, and GPU memory
+         cleanup (torch.cuda.empty_cache(), gc.collect()) between configs.
+         Produces a summary table of mean/min/max times per configuration.
+
+Impact:  Not an optimization itself, but provides the measurement
+         infrastructure to validate and quantify the other optimizations.
+
+================================================================================
+SUMMARY TABLE
+================================================================================
+
+  Category                    | File(s)            | Est. Impact
+  ----------------------------|--------------------|------------------
+  Batched inference           | detector.py        | HIGH
+  Device transfer fix         | detector.py        | HIGH
+  Redundant transfer removal  | detector.py        | LOW-MEDIUM
+  Explicit .cpu() for HOG     | detector.py        | CORRECTNESS
+  Smart DataLoader defaults   | detector.py        | MEDIUM
+  FP16 autocast               | efficiency.py      | MEDIUM-HIGH
+  Inference mode              | efficiency.py,     | LOW-MEDIUM
+                              | batch_processor.py |
+  Auto batch sizing           | efficiency.py      | MEDIUM
+  Streaming to disk           | batch_processor.py | HIGH (large data)
+  Resume support              | batch_processor.py | HIGH (interrupted)
+  Benchmarking tool           | benchmark_run.py   | MEASUREMENT
+
+================================================================================

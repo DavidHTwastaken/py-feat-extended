@@ -581,23 +581,86 @@ with tab_batch:
                         for err in result.errors:
                             st.warning(f"**{err['file']}**: {err['error']}")
 
-                # Load and show summary
+                # Load and show per-file results
                 if os.path.exists(output_csv):
                     df = pd.read_csv(output_csv)
                     st.session_state["last_results"] = df
 
                     emo_cols_present = [c for c in EMOTION_COLS if c in df.columns]
-                    if emo_cols_present:
-                        st.subheader("Batch Summary")
-                        try:
-                            from feat.extensions.report_generator import ReportGenerator
-                            rg = ReportGenerator(df)
-                            st.markdown(rg.summarize_dataset())
-                        except Exception:
-                            st.dataframe(
-                                df[emo_cols_present].describe().T.style.format("{:.3f}"),
-                                use_container_width=True,
-                            )
+                    au_cols_present = [c for c in df.columns if c.startswith("AU")]
+
+                    if "input" in df.columns:
+                        unique_files = df["input"].unique()
+                        st.subheader(f"Results by File ({len(unique_files)} files)")
+
+                        for filepath in unique_files:
+                            file_df = df[df["input"] == filepath].reset_index(drop=True)
+                            fname = Path(filepath).name
+                            n_detections = len(file_df)
+
+                            # Build a short preview for the expander label
+                            label = f"{fname} — {n_detections} detection(s)"
+                            if emo_cols_present:
+                                dominant = file_df[emo_cols_present].mean().idxmax()
+                                label += f" — dominant: {dominant}"
+
+                            with st.expander(label):
+                                # Use mean across detections for charts
+                                mean_row = file_df.mean(numeric_only=True)
+
+                                col_emo, col_au = st.columns(2)
+
+                                with col_emo:
+                                    st.subheader("Emotions")
+                                    if emo_cols_present:
+                                        fig = emotion_bar_chart(mean_row)
+                                        st.pyplot(fig)
+                                        plt.close(fig)
+
+                                with col_au:
+                                    st.subheader("Action Units")
+                                    au_cols_in_row = [c for c in AU_COLS if c in mean_row.index]
+                                    if au_cols_in_row:
+                                        fig = au_bar_chart(mean_row)
+                                        st.pyplot(fig)
+                                        plt.close(fig)
+
+                                # Interpretable summary
+                                st.subheader("Interpretable Summary")
+                                try:
+                                    from feat.extensions.report_generator import ReportGenerator
+                                    rg = ReportGenerator(file_df)
+                                    # Summarize based on mean if multiple detections
+                                    if n_detections == 1:
+                                        st.markdown(rg.summarize_face(0))
+                                    else:
+                                        st.markdown(f"*Averaged over {n_detections} detections in this file.*")
+                                        # Create a single-row df from means for summary
+                                        mean_df = pd.DataFrame([mean_row])
+                                        rg_mean = ReportGenerator(mean_df)
+                                        st.markdown(rg_mean.summarize_face(0))
+                                except Exception:
+                                    st.markdown(generate_summary(mean_row))
+
+                                # Per-detection detail table
+                                if n_detections > 1:
+                                    with st.expander(f"All {n_detections} individual detections"):
+                                        display_cols = []
+                                        if "frame" in file_df.columns:
+                                            display_cols.append("frame")
+                                        display_cols += [c for c in emo_cols_present + au_cols_present if c in file_df.columns]
+                                        fmt_cols = [c for c in display_cols if c != "frame"]
+                                        st.dataframe(
+                                            file_df[display_cols].style.format("{:.3f}", subset=fmt_cols),
+                                            use_container_width=True,
+                                        )
+                    elif emo_cols_present:
+                        # Fallback if no input column
+                        st.subheader("Batch Results")
+                        st.dataframe(
+                            df[emo_cols_present].describe().T.style.format("{:.3f}"),
+                            use_container_width=True,
+                        )
 
 
 # ===================== REPORT GENERATOR TAB =====================
